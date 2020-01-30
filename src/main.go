@@ -10,9 +10,11 @@ import (
 	"strconv"
 	"time"
 
-	"hash/fnv"
+	// "hash/fnv"
 	"sort"
 	"strings"
+
+	"sync"
 )
 
 var cost_matrix = [][]float64{}
@@ -110,9 +112,9 @@ func get_initial_solution(cost_matrix, flow_matrix [][]float64, alpha float64, n
 	}
 
 	//The optimal solution
-	// candidate.Hubs = append(candidate.Hubs, 7)
-	// candidate.Hubs = append(candidate.Hubs, 15)
-	// candidate.Hubs = append(candidate.Hubs, 5)
+	// candidate.Hubs = append(candidate.Hubs, 16)
+	// candidate.Hubs = append(candidate.Hubs, 11)
+	// candidate.Hubs = append(candidate.Hubs, 3)
 
 	// allocate nodes to their nearest candidate.Hubs
 	for i, _ := range cost_matrix {
@@ -162,25 +164,82 @@ func arrayToString(a []int, delim string) string {
 	//return strings.Trim(strings.Join(strings.Fields(fmt.Sprint(a)), delim), "[]")
 }
 
-func hash(s string) uint32 {
-	h := fnv.New32a()
-	h.Write([]byte(s))
-	return h.Sum32()
-}
+// func hash(s string) int {
+// 	h := fnv.New32a()
+// 	h.Write([]byte(s))
+// 	return h.Sum32()
+// }
 
-func isInTabuList(c Candidate, tabuList []uint32) bool {
+// func isInTabuList(c Candidate, tabuList []int) bool {
 
-	hash := hash(arrayToString(c.Solution, ""))
+// 	hash := hash(arrayToString(c.Solution, ""))
+// 	for _, t := range tabuList {
+// 		if hash == t {
+// 			return true
+// 		}
+// 	}
+
+// 	return false
+// }
+
+func isInTabuList(node int, tabuList []int) bool {
 	for _, t := range tabuList {
-		if hash == t {
+		if node == t {
 			return true
 		}
 	}
-
 	return false
 }
 
-func generateCandidate(best Candidate, tabuList []uint32, cost_matrix, flow_matrix [][]float64, alpha float64) Candidate {
+func selectRandomNodeAndHub(best Candidate) (int, int) {
+	selected_node := rand.Intn(len(best.Solution))
+	for isInSlice(selected_node, best.Hubs) {
+		selected_node = rand.Intn(len(best.Solution))
+	}
+
+	// select another random hub to assign to
+	selected_hub := best.Hubs[rand.Intn(len(best.Hubs))]
+	for selected_hub == best.Solution[selected_node] {
+		selected_hub = best.Hubs[rand.Intn(len(best.Hubs))]
+	}
+
+	return selected_node, selected_hub
+}
+
+func generateCandidate(sol, hubs []int, current Candidate, tabuList *[]int, tabuSize int, cost_matrix, flow_matrix [][]float64, alpha float64) Candidate {
+
+	/**
+	 *  swap a random node from one hub to another
+	 * 	in a smart way:
+	 *		find the next nearest hub
+	 */
+
+	best := Candidate{}
+
+	best.Solution = make([]int, len(sol))
+	best.Hubs = make([]int, len(hubs))
+	copy(best.Solution, sol)
+	copy(best.Hubs, hubs)
+
+	found_tabu := true
+	var selected_node, selected_hub int
+	for found_tabu {
+		selected_node, selected_hub = selectRandomNodeAndHub(best)
+		if !isInTabuList(selected_node, *tabuList) {
+			found_tabu = false
+		}
+	}
+
+	if len(*tabuList) == tabuSize {
+		*tabuList = (*tabuList)[1:]
+	}
+	*tabuList = append(*tabuList, selected_node)
+
+	best.Solution[selected_node] = selected_hub
+	best.Cost = calcTotalCost(cost_matrix, flow_matrix, alpha, best.Solution)
+
+	return best
+
 	// randomly switch
 
 	// candidate := Candidate{}
@@ -202,9 +261,10 @@ func generateCandidate(best Candidate, tabuList []uint32, cost_matrix, flow_matr
 	// candidate.Cost = calcTotalCost(cost_matrix, flow_matrix, alpha, candidate.Solution)
 
 	// fmt.Printf("%+v\n", candidate.Solution)
-	return get_initial_solution(cost_matrix, flow_matrix, alpha, 3)
 
 	// return candidate
+
+	// return get_initial_solution(cost_matrix, flow_matrix, alpha, 3)
 
 }
 
@@ -212,25 +272,18 @@ func TabuSearch(initial_solution Candidate, cost_matrix, flow_matrix [][]float64
 	current := initial_solution
 	best = current
 
-	tabuList := make([]uint32, tabuSize)
+	tabuList := make([]int, tabuSize)
 
 	for i := 0; i < iterations; i++ {
 		if i%10000 == 0 {
 			fmt.Printf("Iteration: %d\n", i)
+			current = get_initial_solution(cost_matrix, flow_matrix, alpha, 3)
+			fmt.Println(current.Hubs)
+			// fmt.Printf("Tabu list: %+v\n", tabuList)
 		}
 		candidates := make([]Candidate, maxCandidates)
 		for j, _ := range candidates {
-			candidates[j] = generateCandidate(current, tabuList, cost_matrix, flow_matrix, alpha)
-			found_tabu := true
-
-			for found_tabu {
-				if !isInTabuList(candidates[j], tabuList) {
-					found_tabu = false
-				} else {
-					candidates[j] = generateCandidate(current, tabuList, cost_matrix, flow_matrix, alpha)
-				}
-			}
-			found_tabu = true
+			candidates[j] = generateCandidate(current.Solution, current.Hubs, current, &tabuList, tabuSize, cost_matrix, flow_matrix, alpha)
 		}
 
 		sort.Sort(CandidateVector(candidates))
@@ -241,12 +294,12 @@ func TabuSearch(initial_solution Candidate, cost_matrix, flow_matrix [][]float64
 				fmt.Println("found better solution!")
 				best = bestCandidate
 				best.Print()
-				// HASH the solution and add to tabu list
-				hash := hash(arrayToString(best.Solution, ""))
-				if len(tabuList) == tabuSize {
-					tabuList = tabuList[1:]
-				}
-				tabuList = append(tabuList, hash)
+				// // HASH the solution and add to tabu list
+				// hash := hash(arrayToString(best.Solution, ""))
+				// if len(tabuList) == tabuSize {
+				// 	tabuList = tabuList[1:]
+				// }
+				// tabuList = append(tabuList, hash)
 
 			}
 		}
@@ -260,26 +313,26 @@ func main() {
 
 	var err error
 
-	alpha := 0.8
+	alpha := 0.2
 
-	cost_matrix, err = read_matrix("postal_office_network_distance_55.csv", 55)
-	// cost_matrix, err = read_matrix("./Cost_matrix10.csv", 10)
+	// cost_matrix, err = read_matrix("postal_office_network_distance_55.csv", 55)
+	cost_matrix, err = read_matrix("./Cost_matrix25.csv", 25)
 	if err != nil {
 		fmt.Println("Error", err.Error())
 		return
 	}
 
-	flow_matrix, err = read_matrix("postal_office_network_flow_55.csv", 55)
-	// flow_matrix, err = read_matrix("./Flow_matrix10.csv", 10)
+	// flow_matrix, err = read_matrix("postal_office_network_flow_55.csv", 55)
+	flow_matrix, err = read_matrix("./Flow_matrix25.csv", 25)
 	if err != nil {
 		fmt.Println("Error", err.Error())
 		return
 	}
 
 	total_flow := calcTotalFlow(flow_matrix)
-	fmt.Printf("Total Flow %+v", total_flow)
+	fmt.Printf("Total Flow %+v\n", total_flow)
 
-	// felipes_solution := []int{3, 2, 2, 3, 3, 8, 3, 3, 8, 3, 3, 3, 3, 3, 3, 3, 2, 2, 3, 2, 3, 3, 3, 3, 2}
+	// felipes_solution := []int{3, 16, 16, 3, 3, 3, 3, 3, 3, 3, 3, 11, 3, 16, 3, 3, 16, 16, 11, 16, 3, 11, 11, 3, 16}
 	// fmt.Printf("Felipe's code: %+v\n", calcTotalCost(cost_matrix, flow_matrix, alpha, felipes_solution))
 	// os.Exit(0)
 
@@ -289,26 +342,63 @@ func main() {
 	fmt.Printf("Elapsed Time %s\n", elapsed)
 
 	init_solution.Print()
+	fmt.Println(init_solution.Solution)
 
-	iterations := 20000 //100
-	tabuSize := 50      //15
+	iterations := 1000000 //100
+	tabuSize := 20        //15
 	maxCandidates := 30
 	start = time.Now()
-	best := TabuSearch(init_solution, cost_matrix, flow_matrix, tabuSize, maxCandidates, iterations, alpha)
+	// best := TabuSearch(init_solution, cost_matrix, flow_matrix, tabuSize, maxCandidates, iterations, alpha)
 	elapsed = time.Since(start)
+
+	var wg sync.WaitGroup
+	wg.Add(4)
+	var best1 Candidate
+	var best2 Candidate
+	var best3 Candidate
+	var best4 Candidate
+
+	go func() {
+		start = time.Now()
+		best1 = TabuSearch(init_solution, cost_matrix, flow_matrix, tabuSize, maxCandidates, iterations, alpha)
+		elapsed = time.Since(start)
+		fmt.Printf("Elapsed Time %s\n", elapsed)
+		wg.Done()
+	}()
+
+	go func() {
+		start = time.Now()
+		best2 = TabuSearch(init_solution, cost_matrix, flow_matrix, tabuSize, maxCandidates, iterations, alpha)
+		elapsed = time.Since(start)
+		fmt.Printf("Elapsed Time %s\n", elapsed)
+		wg.Done()
+	}()
+
+	go func() {
+		start = time.Now()
+		best3 = TabuSearch(init_solution, cost_matrix, flow_matrix, tabuSize, maxCandidates, iterations, alpha)
+		elapsed = time.Since(start)
+		fmt.Printf("Elapsed Time %s\n", elapsed)
+		wg.Done()
+	}()
+
+	go func() {
+		start = time.Now()
+		best4 = TabuSearch(init_solution, cost_matrix, flow_matrix, tabuSize, maxCandidates, iterations, alpha)
+		elapsed = time.Since(start)
+		fmt.Printf("Elapsed Time %s\n", elapsed)
+		wg.Done()
+	}()
+	wg.Wait()
+
+	best := []Candidate{best1, best2, best3, best4}
+	sort.Sort(CandidateVector(best))
 
 	fmt.Println()
 	fmt.Println("Tabu Solution:")
 	fmt.Printf("Elapsed Time %s\n", elapsed)
 
-	best.Print()
-	fmt.Printf("Normalized Cost: %+v\n", best.Cost/total_flow)
-
-	// go func() {
-	// 	start = time.Now()
-	// 	TabuMain()
-	// 	elapsed = time.Since(start)
-	// 	fmt.Printf("Elapsed Time %s\n", elapsed)
-	// }()
+	best[0].Print()
+	fmt.Printf("Normalized Cost: %+v\n", best[0].Cost/total_flow)
 
 }
