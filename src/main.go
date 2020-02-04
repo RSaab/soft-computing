@@ -19,6 +19,11 @@ import (
 
 var cost_matrix = [][]float64{}
 var flow_matrix = [][]float64{}
+var total_flow float64
+
+var alpha = 0.2
+var no_hubs = 3
+var no_routines = 4
 
 func read_matrix(location string, no_nodes int) (matrix [][]float64, err error) {
 	f, _ := os.Open(location)
@@ -64,9 +69,11 @@ func isInSlice(a int, list []int) bool {
 }
 
 type Candidate struct {
-	Solution []int
-	Cost     float64
-	Hubs     []int
+	Solution       []int
+	Cost           float64
+	Hubs           []int
+	NormalizedCost float64
+	SwappedNode    int
 }
 
 type CandidateVector []Candidate
@@ -95,6 +102,13 @@ func (c Candidate) Print() {
 		fmt.Printf("%-2d\t", n+1)
 	}
 	fmt.Printf("\nTotal Cost: %+v\n", c.Cost)
+	fmt.Printf("Normalized Cost: %+v\n", c.NormalizedCost)
+
+}
+
+func (c *Candidate) calcCost(alpha float64) {
+	c.Cost = calcTotalCost(cost_matrix, flow_matrix, alpha, c.Solution)
+	c.NormalizedCost = c.Cost / total_flow
 }
 
 func get_initial_solution(cost_matrix, flow_matrix [][]float64, alpha float64, number_of_hubs int) Candidate {
@@ -127,7 +141,7 @@ func get_initial_solution(cost_matrix, flow_matrix [][]float64, alpha float64, n
 		candidate.Solution = append(candidate.Solution, target_hub)
 	}
 
-	candidate.Cost = calcTotalCost(cost_matrix, flow_matrix, alpha, candidate.Solution)
+	// candidate.Cost = calcTotalCost(cost_matrix, flow_matrix, alpha, candidate.Solution)
 
 	return candidate
 }
@@ -192,6 +206,8 @@ func isInTabuList(node int, tabuList []int) bool {
 }
 
 func selectRandomNodeAndHub(best Candidate) (int, int) {
+
+	// fmt.Println(best.Solution)
 	selected_node := rand.Intn(len(best.Solution))
 	for isInSlice(selected_node, best.Hubs) {
 		selected_node = rand.Intn(len(best.Solution))
@@ -230,11 +246,6 @@ func generateCandidate(sol, hubs []int, current Candidate, tabuList *[]int, tabu
 		}
 	}
 
-	if len(*tabuList) == tabuSize {
-		*tabuList = (*tabuList)[1:]
-	}
-	*tabuList = append(*tabuList, selected_node)
-
 	best.Solution[selected_node] = selected_hub
 	best.Cost = calcTotalCost(cost_matrix, flow_matrix, alpha, best.Solution)
 
@@ -268,39 +279,125 @@ func generateCandidate(sol, hubs []int, current Candidate, tabuList *[]int, tabu
 
 }
 
+func updateTabuList(node int, tabuList *[]int, tabuSize int) {
+	if len(*tabuList) == tabuSize {
+		*tabuList = (*tabuList)[1:]
+	}
+	*tabuList = append(*tabuList, node)
+}
+
+// swap a node with its hub
+func generateCandidateTypeA(current_solution Candidate) (c Candidate, swapped_node int) {
+	neighbor := Candidate{}
+
+	neighbor.Solution = make([]int, len(current_solution.Solution))
+	neighbor.Hubs = make([]int, len(current_solution.Hubs))
+	copy(neighbor.Solution, current_solution.Solution)
+	copy(neighbor.Hubs, current_solution.Hubs)
+
+	random_node, _ := selectRandomNodeAndHub(neighbor)
+
+	hub_to_switch := neighbor.Solution[random_node]
+
+	for i, hub := range neighbor.Solution {
+		if hub == hub_to_switch {
+			neighbor.Solution[i] = random_node
+		}
+	}
+
+	for i, hub := range neighbor.Hubs {
+		if hub == hub_to_switch {
+			neighbor.Hubs[i] = random_node
+		}
+	}
+
+	return neighbor, random_node
+}
+
+// swap two non hub nodes
+func generateCandidateTypeB(current_solution Candidate) (c Candidate, swapped_node int) {
+	neighbor := Candidate{}
+
+	neighbor.Solution = make([]int, len(current_solution.Solution))
+	neighbor.Hubs = make([]int, len(current_solution.Hubs))
+	copy(neighbor.Solution, current_solution.Solution)
+	copy(neighbor.Hubs, current_solution.Hubs)
+
+	random_node_1, _ := selectRandomNodeAndHub(neighbor)
+	random_node_2, _ := selectRandomNodeAndHub(neighbor)
+
+	hub_node_1 := neighbor.Solution[random_node_1]
+	neighbor.Solution[random_node_1] = neighbor.Solution[random_node_2]
+	neighbor.Solution[random_node_2] = hub_node_1
+
+	return neighbor, random_node_1
+}
+
+// reallocate a random node to a new hub
+func generateCandidateTypeC(current_solution Candidate) (c Candidate, swapped_node int) {
+	neighbor := Candidate{}
+
+	neighbor.Solution = make([]int, len(current_solution.Solution))
+	neighbor.Hubs = make([]int, len(current_solution.Hubs))
+	copy(neighbor.Solution, current_solution.Solution)
+	copy(neighbor.Hubs, current_solution.Hubs)
+
+	random_node, random_hub := selectRandomNodeAndHub(neighbor)
+
+	neighbor.Solution[random_node] = random_hub
+
+	return neighbor, random_node
+}
+
+/**
+If i am randomly selecting a node to swap then it is possible to miss one
+of the neighboring solutions
+
+IS THIS CORRECT??
+*/
 func TabuSearch(initial_solution Candidate, cost_matrix, flow_matrix [][]float64, tabuSize, maxCandidates, iterations int, alpha float64) (best Candidate) {
 	current := initial_solution
 	best = current
 
 	tabuList := make([]int, tabuSize)
 
+	current_best_solution_iteration := 0
 	for i := 0; i < iterations; i++ {
+		if i-current_best_solution_iteration > 10000 {
+			fmt.Println("Aspiration condition met. Stopping...")
+			break
+		}
+
 		if i%10000 == 0 {
 			fmt.Printf("Iteration: %d\n", i)
-			current = get_initial_solution(cost_matrix, flow_matrix, alpha, 3)
 			fmt.Println(current.Hubs)
-			// fmt.Printf("Tabu list: %+v\n", tabuList)
 		}
-		candidates := make([]Candidate, maxCandidates)
-		for j, _ := range candidates {
-			candidates[j] = generateCandidate(current.Solution, current.Hubs, current, &tabuList, tabuSize, cost_matrix, flow_matrix, alpha)
+		var candidates []Candidate
+		for j := 0; j < maxCandidates; j++ {
+			// candidates[j] = generateCandidate(current.Solution, current.Hubs, current, &tabuList, tabuSize, cost_matrix, flow_matrix, alpha)
+			// neighbor, swapped_node := generateCandidateTypeA(current)
+			// neighbor, swapped_node := generateCandidateTypeB(current)
+			neighbor, swapped_node := generateCandidateTypeC(current)
+			if isInSlice(swapped_node, tabuList) {
+				continue
+			}
+
+			neighbor.SwappedNode = swapped_node
+			neighbor.calcCost(alpha)
+			candidates = append(candidates, neighbor)
 		}
 
 		sort.Sort(CandidateVector(candidates))
 		bestCandidate := candidates[0]
+		updateTabuList(bestCandidate.SwappedNode, &tabuList, tabuSize)
+
 		if bestCandidate.Cost < current.Cost {
 			current = bestCandidate
 			if bestCandidate.Cost < best.Cost {
 				fmt.Println("found better solution!")
+				current_best_solution_iteration = i
 				best = bestCandidate
 				best.Print()
-				// // HASH the solution and add to tabu list
-				// hash := hash(arrayToString(best.Solution, ""))
-				// if len(tabuList) == tabuSize {
-				// 	tabuList = tabuList[1:]
-				// }
-				// tabuList = append(tabuList, hash)
-
 			}
 		}
 
@@ -309,96 +406,114 @@ func TabuSearch(initial_solution Candidate, cost_matrix, flow_matrix [][]float64
 	return best
 }
 
+/*
+Tabu Solution: best so far for postal office network
+
+Setup:
+iterations := 1000000
+tabuSize := 20
+maxCandidates := 35
+alpha := 0.2
+no_hubs := 3
+
+Elapsed Time 13m52.429978999s
+Hubs: [3 11 54]
+Nodes:  	1 	2 	3 	4 	5 	6 	7 	8 	9 	10	11	12	13	14	15	16	17	18	19	20	21	22	23	24	25	26	27	28	29	30	31	32	33	34	35	36	37	38	39	40	41	42	43	44	45	46	47	48	49	50	51	52	53	54	55
+Solution:	55	55	55	4 	12	4 	12	12	55	55	12	12	12	4 	55	12	55	12	55	4 	4 	55	55	12	55	12	12	4 	4 	12	4 	12	12	55	55	55	4 	55	4 	12	55	55	4 	4 	4 	4 	4 	55	4 	55	55	12	4 	55	55
+Total Cost: 2.5081982534400032e+10
+Normalized Cost: 615.4721173882486
+
+
+Setup:
+iterations := 1000 //100
+tabuSize := 20  //15
+maxCandidates := 35
+
+alpha := 0.2
+no_hubs := 3
+no_routines := 4
+Elapsed Time 823.945195ms
+Tabu Solution:
+Hubs: [29 44 1]
+Nodes:  	1 	2 	3 	4 	5 	6 	7 	8 	9 	10	11	12	13	14	15	16	17	18	19	20	21	22	23	24	25	26	27	28	29	30	31	32	33	34	35	36	37	38	39	40	41	42	43	44	45	46	47	48	49	50	51	52	53	54	55
+Solution:	45	2 	2 	45	45	2 	30	30	2 	2 	45	30	30	45	2 	30	2 	30	2 	45	45	2 	2 	45	45	30	30	45	45	30	45	30	30	2 	2 	2 	45	2 	30	30	2 	2 	45	30	45	2 	45	2 	30	2 	2 	30	30	2 	2
+Total Cost: 2.4847582590400024e+10
+Normalized Cost: 609.7203140907418
+
+*/
+
 func main() {
 
 	var err error
 
-	alpha := 0.2
+	iterations := 1000000 //100
+	tabuSize := 20        //15
+	maxCandidates := 40
 
 	// cost_matrix, err = read_matrix("postal_office_network_distance_55.csv", 55)
-	cost_matrix, err = read_matrix("./Cost_matrix25.csv", 25)
+	cost_matrix, err = read_matrix("./Cost_matrix10.csv", 10)
 	if err != nil {
 		fmt.Println("Error", err.Error())
 		return
 	}
 
 	// flow_matrix, err = read_matrix("postal_office_network_flow_55.csv", 55)
-	flow_matrix, err = read_matrix("./Flow_matrix25.csv", 25)
+	flow_matrix, err = read_matrix("./Flow_matrix10.csv", 10)
 	if err != nil {
 		fmt.Println("Error", err.Error())
 		return
 	}
 
-	total_flow := calcTotalFlow(flow_matrix)
+	total_flow = calcTotalFlow(flow_matrix)
+
 	fmt.Printf("Total Flow %+v\n", total_flow)
+	SA()
+	os.Exit(0)
 
 	// felipes_solution := []int{3, 16, 16, 3, 3, 3, 3, 3, 3, 3, 3, 11, 3, 16, 3, 3, 16, 16, 11, 16, 3, 11, 11, 3, 16}
 	// fmt.Printf("Felipe's code: %+v\n", calcTotalCost(cost_matrix, flow_matrix, alpha, felipes_solution))
 	// os.Exit(0)
 
 	start := time.Now()
-	init_solution := get_initial_solution(cost_matrix, flow_matrix, alpha, 3)
+	init_solution := get_initial_solution(cost_matrix, flow_matrix, alpha, no_hubs)
+
+	init_solution.calcCost(alpha)
 	elapsed := time.Since(start)
 	fmt.Printf("Elapsed Time %s\n", elapsed)
 
 	init_solution.Print()
-	fmt.Println(init_solution.Solution)
 
-	iterations := 1000000 //100
-	tabuSize := 20        //15
-	maxCandidates := 30
 	start = time.Now()
 	// best := TabuSearch(init_solution, cost_matrix, flow_matrix, tabuSize, maxCandidates, iterations, alpha)
-	elapsed = time.Since(start)
+	// elapsed = time.Since(start)
 
 	var wg sync.WaitGroup
-	wg.Add(4)
-	var best1 Candidate
-	var best2 Candidate
-	var best3 Candidate
-	var best4 Candidate
 
-	go func() {
-		start = time.Now()
-		best1 = TabuSearch(init_solution, cost_matrix, flow_matrix, tabuSize, maxCandidates, iterations, alpha)
-		elapsed = time.Since(start)
-		fmt.Printf("Elapsed Time %s\n", elapsed)
-		wg.Done()
-	}()
+	var best []Candidate
 
-	go func() {
-		start = time.Now()
-		best2 = TabuSearch(init_solution, cost_matrix, flow_matrix, tabuSize, maxCandidates, iterations, alpha)
-		elapsed = time.Since(start)
-		fmt.Printf("Elapsed Time %s\n", elapsed)
-		wg.Done()
-	}()
+	for i := 0; i < no_routines; i++ {
+		wg.Add(1)
+		go func() {
+			start = time.Now()
+			init_solution = get_initial_solution(cost_matrix, flow_matrix, alpha, no_hubs)
+			init_solution.calcCost(alpha)
+			c := TabuSearch(init_solution, cost_matrix, flow_matrix, tabuSize, maxCandidates, iterations, alpha)
+			elapsed = time.Since(start)
+			fmt.Printf("Elapsed Time %s\n", elapsed)
+			best = append(best, c)
+			wg.Done()
+		}()
 
-	go func() {
-		start = time.Now()
-		best3 = TabuSearch(init_solution, cost_matrix, flow_matrix, tabuSize, maxCandidates, iterations, alpha)
-		elapsed = time.Since(start)
-		fmt.Printf("Elapsed Time %s\n", elapsed)
-		wg.Done()
-	}()
+	}
 
-	go func() {
-		start = time.Now()
-		best4 = TabuSearch(init_solution, cost_matrix, flow_matrix, tabuSize, maxCandidates, iterations, alpha)
-		elapsed = time.Since(start)
-		fmt.Printf("Elapsed Time %s\n", elapsed)
-		wg.Done()
-	}()
 	wg.Wait()
 
-	best := []Candidate{best1, best2, best3, best4}
 	sort.Sort(CandidateVector(best))
 
 	fmt.Println()
-	fmt.Println("Tabu Solution:")
 	fmt.Printf("Elapsed Time %s\n", elapsed)
+	fmt.Println("Tabu Solution:")
 
 	best[0].Print()
-	fmt.Printf("Normalized Cost: %+v\n", best[0].Cost/total_flow)
 
 }
