@@ -91,6 +91,7 @@ func (c CandidateVector) Swap(i, j int) {
 }
 
 func (c Candidate) Print() {
+	// fmt.Fprintln(os.Stderr, "")
 	fmt.Printf("Hubs: %+v\n", c.Hubs)
 	fmt.Printf("Nodes:  \t")
 	for i, _ := range c.Solution {
@@ -207,7 +208,7 @@ func isInTabuList(node int, tabuList []int) bool {
 
 func selectRandomNodeAndHub(best Candidate) (int, int) {
 
-	// fmt.Println(best.Solution)
+	// fmt.Printf(best.Solution)
 	selected_node := rand.Intn(len(best.Solution))
 	for isInSlice(selected_node, best.Hubs) {
 		selected_node = rand.Intn(len(best.Solution))
@@ -361,24 +362,29 @@ func TabuSearch(initial_solution Candidate, cost_matrix, flow_matrix [][]float64
 
 	tabuList := make([]int, tabuSize)
 
-	current_best_solution_iteration := 0
+	// current_best_solution_iteration := 0
 	for i := 0; i < iterations; i++ {
-		if i-current_best_solution_iteration > 10000 {
-			fmt.Println("Aspiration condition met. Stopping...")
-			break
-		}
+		// if i-current_best_solution_iteration > 10000 {
+		// 	fmt.Printf("Aspiration condition met. Stopping...")
+		// 	break
+		// }
 
 		if i%10000 == 0 {
-			fmt.Printf("Iteration: %d\n", i)
-			fmt.Println(current.Hubs)
+			// fmt.Printf("Iteration: %d\n", i)
+			// fmt.Printf(current.Hubs)
+			fmt.Fprintf(os.Stderr, "\rIteration: %d", i)
+
 		}
 		var candidates []Candidate
 		for j := 0; j < maxCandidates; j++ {
 			// candidates[j] = generateCandidate(current.Solution, current.Hubs, current, &tabuList, tabuSize, cost_matrix, flow_matrix, alpha)
-			// neighbor, swapped_node := generateCandidateTypeA(current)
+			neighbor, swapped_node := generateCandidateTypeA(current)
 			// neighbor, swapped_node := generateCandidateTypeB(current)
-			neighbor, swapped_node := generateCandidateTypeC(current)
+			// neighbor, swapped_node := generateCandidateTypeC(current)
 			if isInSlice(swapped_node, tabuList) {
+				// fmt.Printf("solution is tabu")
+				// fmt.Printf("swapped node %d - ", swapped_node)
+				// fmt.Printf("tabu list: %+v\n", tabuList)
 				continue
 			}
 
@@ -388,14 +394,20 @@ func TabuSearch(initial_solution Candidate, cost_matrix, flow_matrix [][]float64
 		}
 
 		sort.Sort(CandidateVector(candidates))
+
+		if len(candidates) <= 0 {
+			fmt.Printf("No candidates generated!\n")
+			continue
+		}
+
 		bestCandidate := candidates[0]
 		updateTabuList(bestCandidate.SwappedNode, &tabuList, tabuSize)
 
 		if bestCandidate.Cost < current.Cost {
 			current = bestCandidate
 			if bestCandidate.Cost < best.Cost {
-				fmt.Println("found better solution!")
-				current_best_solution_iteration = i
+				fmt.Printf("found better solution!\n")
+				// current_best_solution_iteration = i
 				best = bestCandidate
 				best.Print()
 			}
@@ -446,29 +458,26 @@ func main() {
 
 	var err error
 
-	iterations := 1000000 //100
-	tabuSize := 20        //15
-	maxCandidates := 40
+	iterations := 100000 //100
+	tabuSize := 10       //15
+	maxCandidates := 60
 
 	// cost_matrix, err = read_matrix("postal_office_network_distance_55.csv", 55)
-	cost_matrix, err = read_matrix("./Cost_matrix10.csv", 10)
+	cost_matrix, err = read_matrix("./Cost_matrix25.csv", 25)
 	if err != nil {
-		fmt.Println("Error", err.Error())
+		fmt.Printf("Error", err.Error())
 		return
 	}
 
 	// flow_matrix, err = read_matrix("postal_office_network_flow_55.csv", 55)
-	flow_matrix, err = read_matrix("./Flow_matrix10.csv", 10)
+	flow_matrix, err = read_matrix("./Flow_matrix25.csv", 25)
 	if err != nil {
-		fmt.Println("Error", err.Error())
+		fmt.Printf("Error", err.Error())
 		return
 	}
 
 	total_flow = calcTotalFlow(flow_matrix)
-
 	fmt.Printf("Total Flow %+v\n", total_flow)
-	SA()
-	os.Exit(0)
 
 	// felipes_solution := []int{3, 16, 16, 3, 3, 3, 3, 3, 3, 3, 3, 11, 3, 16, 3, 3, 16, 16, 11, 16, 3, 11, 11, 3, 16}
 	// fmt.Printf("Felipe's code: %+v\n", calcTotalCost(cost_matrix, flow_matrix, alpha, felipes_solution))
@@ -510,10 +519,14 @@ func main() {
 
 	sort.Sort(CandidateVector(best))
 
-	fmt.Println()
+	fmt.Printf("\n")
 	fmt.Printf("Elapsed Time %s\n", elapsed)
-	fmt.Println("Tabu Solution:")
+
+	fmt.Printf("\n\nTabu Search Solution:\n")
 
 	best[0].Print()
+
+	fmt.Printf("\n\nSimulate Annealing\n")
+	SA()
 
 }
