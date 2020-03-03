@@ -11,6 +11,10 @@ import (
 	"io"
 	"os"
 	"strconv"
+
+	"sort"
+	// "sync"
+	// "log"
 )
 
 var cost_matrix = [][]float64{}
@@ -18,13 +22,21 @@ var flow_matrix = [][]float64{}
 var total_flow float64
 var alpha = 0.2
 var no_hubs = 3
-var no_routines = 4
+var no_routines = 10
 
 // MutationRate is the rate of mutation
-var MutationRate = 0.01
+var MutationRate = 0.05
 
 // PopSize is the size of the population
-var PopSize = 5000
+var PopSize = 300     // 5000
+var generations = 200 //100
+var aspiration = 300
+
+// func checkError(message string, err error) {
+// 	if err != nil {
+// 		log.Fatal(message, err)
+// 	}
+// }
 
 func read_matrix(location string, no_nodes int) (matrix [][]float64, err error) {
 	f, _ := os.Open(location)
@@ -76,60 +88,158 @@ func isInSlice(a int, list []int) bool {
 	return false
 }
 
-func main() {
-	var err error
-
-	// cost_matrix, err = read_matrix("postal_office_network_distance_55.csv", 55)
-	cost_matrix, err = read_matrix("./Cost_matrix25.csv", 25)
-	if err != nil {
-		fmt.Printf("Error", err.Error())
-		return
-	}
-
-	// flow_matrix, err = read_matrix("postal_office_network_flow_55.csv", 55)
-	flow_matrix, err = read_matrix("./Flow_matrix25.csv", 25)
-	if err != nil {
-		fmt.Printf("Error", err.Error())
-		return
-	}
-
-	total_flow = calcTotalFlow(flow_matrix)
-	fmt.Printf("Total Flow %+v\n", total_flow)
-
-	start := time.Now()
+// func RunGA(writer *csv.Writer) Organism {
+func RunGA() Organism {
+	// start := time.Now()
 	rand.Seed(time.Now().UTC().UnixNano())
 
 	// target := []byte("To be or not to be")
 	population := createPopulation(cost_matrix, flow_matrix, alpha, no_hubs)
 
 	generation := 0
+	iterations_since_best_oragnism := 0
+	var bestOragismFound Organism
 	bestOrganism := Organism{}
-	for i := 0; i < 300; i++ {
+
+	generation_best := make([]string, 0)
+
+	for i := 0; i < generations; i++ {
+		// i := 0
+		// for time.Since(start) < 150*time.Second {
 		generation++
 		bestOrganism = getBest(population)
-
-		// if bestOrganism.Fitness >= 0.00130 {
-		// 	break
-		// }
-		fmt.Printf("\r generation: %d | fitness: %2f | Normalized Cost %2f\n", generation, bestOrganism.Fitness, bestOrganism.DNA.Cost/total_flow)
-		// bestOrganism.DNA.Print()
+		bestOrganism.Generation = i
+		if bestOrganism.Fitness > bestOragismFound.Fitness {
+			iterations_since_best_oragnism = 0
+			bestOragismFound = bestOrganism
+		} else {
+			iterations_since_best_oragnism++
+			if iterations_since_best_oragnism > 100 {
+				break
+			}
+		}
+		generation_best = append(generation_best, fmt.Sprintf("%f", 1/bestOrganism.Fitness))
 
 		maxFitness := bestOrganism.Fitness
 		pool := createPool(population, maxFitness)
 		population = naturalSelection(pool, population)
 
-		elapsed := time.Since(start)
-		fmt.Printf("\nTime taken: %s\n", elapsed)
+		// elapsed := time.Since(start)
+		// fmt.Printf("\nTime taken: %s\n", elapsed)
 	}
-	// fmt.Printf("\r generation: %d | fitness: %2f | Normalized Cost %2f\n", generation, bestOrganism.Fitness, bestOrganism.DNA.Cost/total_flow)
+	// fmt.Printf("%+4v\n", generation_best)
 
+	// err := writer.Write(generation_best)
+	// checkError("Cannot write to file", err)
+	return bestOragismFound
+}
+
+func main() {
+	var err error
+
+	alphas := []float64{
+		0.2,
+		0.4,
+		0.8,
+	}
+	hubs := []int{
+		3,
+		4,
+	}
+
+	data_sets_flow := []string{
+		"Flow_matrix10.csv",
+		"Flow_matrix15.csv",
+		"Flow_matrix20.csv",
+		"Flow_matrix25.csv",
+		"postal_office_network_flow_25.csv",
+		"postal_office_network_flow_55.csv",
+	}
+	data_sets_cost := []string{
+		"Cost_matrix10.csv",
+		"Cost_matrix15.csv",
+		"Cost_matrix20.csv",
+		"Cost_matrix25.csv",
+		"postal_office_network_distance_25.csv",
+		"postal_office_network_distance_55.csv",
+	}
+	sizes := []int{
+		10,
+		15,
+		20,
+		25,
+		25,
+		55,
+	}
+
+	fmt.Printf("Confirguration: Mutataion Rate[%0.3f]\tPopulation Size[%d]\tGenerations[%d]\tAspiration[%d]\n", MutationRate, PopSize, generations, aspiration)
+	fmt.Printf("%-40s\t%-10s\t%-10s\t%-20s\t%-20s\t%-20s\t%-20s\t%-20s\t%-20s\n", "Datset", "No Hubs", "Alpha", "Hub Locations", "TNC", "Avg TNC", "Time Per Run", "Total Time", "Avg Generations")
+	for i, _ := range data_sets_flow {
+		cost_matrix, err = read_matrix(data_sets_cost[i], sizes[i])
+		if err != nil {
+			fmt.Printf("Error", err.Error())
+			return
+		}
+
+		// flow_matrix, err = read_matrix("postal_office_network_flow_55.csv", 55)
+		flow_matrix, err = read_matrix(data_sets_flow[i], sizes[i])
+		if err != nil {
+			fmt.Printf("Error", err.Error())
+			return
+		}
+
+		total_flow = calcTotalFlow(flow_matrix)
+		for _, hub := range hubs {
+			no_hubs = hub
+			for _, alfa := range alphas {
+				alpha = alfa
+				primary_start_time := time.Now()
+				var best []Organism
+
+				fmt.Printf("%-40s\t", data_sets_cost[i])
+				fmt.Printf("%-10d\t", no_hubs)
+				fmt.Printf("%-10f\t", alpha)
+
+				// file, err := os.Create(fmt.Sprintf("%s_%d_%f_results.csv", data_sets_cost[i], no_hubs, alpha))
+				// checkError("Cannot create file", err)
+
+				// writer := csv.NewWriter(file)
+
+				for k := 0; k < no_routines; k++ {
+					start := time.Now()
+					// c := RunGA(writer)
+					c := RunGA()
+					elapsed := time.Since(start)
+					c.DNA.ElapsedTime = elapsed
+					best = append(best, c)
+				}
+				// writer.Flush()
+				// file.Close()
+
+				sort.Sort(OrganismVector(best))
+
+				// average TNC
+				average_tnc := 0.0
+				average_generations := 0
+				for _, c := range best {
+					average_tnc += c.DNA.Cost
+					average_generations += c.Generation
+				}
+				average_tnc = average_tnc / float64(len(best))
+				average_generations = average_generations / len(best)
+				fmt.Printf("%-v\t%-20f\t%-20f\t%-20s\t%-20s\t%-20d\n", best[0].DNA.Hubs, 1/best[0].Fitness, average_tnc, best[0].DNA.ElapsedTime, time.Since(primary_start_time), average_generations)
+
+			}
+		}
+	}
 }
 
 //DNA
 type SolutionDNA struct {
-	Solution []int
-	Hubs     []int
-	Cost     float64 // total cost
+	Solution    []int
+	Hubs        []int
+	Cost        float64 // total cost
+	ElapsedTime time.Duration
 }
 
 func (c SolutionDNA) Print() {
@@ -151,8 +261,23 @@ func (c SolutionDNA) Print() {
 
 // Organism for this genetic algorithm
 type Organism struct {
-	DNA     *SolutionDNA
-	Fitness float64 // normalized cost
+	DNA        *SolutionDNA
+	Fitness    float64 // normalized cost
+	Generation int
+}
+
+type OrganismVector []Organism
+
+func (c OrganismVector) Len() int {
+	return len(c)
+}
+
+func (c OrganismVector) Less(i, j int) bool {
+	return c[i].Fitness > c[j].Fitness
+}
+
+func (c OrganismVector) Swap(i, j int) {
+	c[j], c[i] = c[i], c[j]
 }
 
 // creates a Organism
@@ -214,8 +339,8 @@ func (d *Organism) calcFitness() {
 		}
 	}
 
-	d.Fitness = (total_cost / total_flow)
-	d.DNA.Cost = total_cost
+	d.Fitness = 1 / (total_cost / total_flow)
+	d.DNA.Cost = total_cost / total_flow
 	return
 }
 
@@ -285,6 +410,8 @@ func crossover(d1 Organism, d2 Organism) Organism {
 }
 
 // mutate the Organism
+
+// try to mutate hubs and then assign nodes to nearest neighbor
 func (d *Organism) mutate() {
 	for i := 0; i < len(d.DNA.Solution); i++ {
 		if rand.Float64() < MutationRate {

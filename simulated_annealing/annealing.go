@@ -47,17 +47,6 @@ func NewAnnealer(initialState State) *Annealer {
 	return a
 }
 
-// Outputs to stderr.
-// Prints the current temperature, energy, acceptance rate, improvement rate, elapsed time, and remaining time.
-// The acceptance rate indicates the percentage of moves since the last update
-// that were accepted by the Metropolis algorithm.
-// It includes moves that decreased the energy, moves that left the energy unchanged,
-// and moves that increased the energy yet were reached by thermal excitation.
-// The improvement rate indicates the percentage of moves since the last update that strictly decreased the energy.
-// At high temperatures it will include both moves that improved the overall state and
-// moves that simply undid previously accepted moves that increased the energy by thermal excititation.
-// At low temperatures it will tend toward zero as the moves that can decrease the energy are exhausted and
-// moves that would increase the energy are no longer thermally accessible.
 func (a *Annealer) update(step int, T float64, E float64, acceptance float64, improvement float64) {
 	elapsed := now() - a.startTime
 	if step == 0 {
@@ -70,22 +59,13 @@ func (a *Annealer) update(step int, T float64, E float64, acceptance float64, im
 	}
 }
 
-// Anneal minimizes the energy of a system by simulated annealing.
-// Parameters
-// state : an initial arrangement of the system
-// Returns
-// (state, energy): the best state and energy found.
 func (a *Annealer) Anneal() (interface{}, float64) {
 	step := 0
 	a.startTime = now()
 
-	// Precompute factor for exponential cooling from Tmax to Tmin
-	if a.Tmin <= 0.0 {
-		panic("Exponential cooling requires a minimum temperature greater than zero.")
-	}
 	Tfactor := -math.Log(a.Tmax / a.Tmin)
 
-	// Note initial state
+	// initial state
 	T := a.Tmax
 	E := a.State.Energy()
 	prevState := a.State.Copy().(State)
@@ -93,11 +73,11 @@ func (a *Annealer) Anneal() (interface{}, float64) {
 	a.bestState = a.State.Copy().(State)
 	a.bestEnergy = E
 	trials, accepts, improves := 0, 0.0, 0.0
-	var updateWavelength float64
-	if a.Updates > 0 {
-		updateWavelength = float64(a.Steps) / float64(a.Updates)
-		a.update(step, T, E, 0.0, 0.0)
-	}
+	// var updateWavelength float64
+	// if a.Updates > 0 {
+	// 	updateWavelength = float64(a.Steps) / float64(a.Updates)
+	// 	a.update(step, T, E, 0.0, 0.0)
+	// }
 
 	// Attempt moves to new states
 	for step < a.Steps && !a.UserExit {
@@ -124,14 +104,14 @@ func (a *Annealer) Anneal() (interface{}, float64) {
 				a.bestEnergy = E
 			}
 		}
-		if a.Updates > 1 {
-			if (step / int(updateWavelength)) > ((step - 1) / int(updateWavelength)) {
-				a.update(step, T, E, accepts/float64(trials), improves/float64(trials))
-				trials, accepts, improves = 0, 0.0, 0.0
-			}
-		}
+		// if a.Updates > 1 {
+		// 	if (step / int(updateWavelength)) > ((step - 1) / int(updateWavelength)) {
+		// 		a.update(step, T, E, accepts/float64(trials), improves/float64(trials))
+		// 		trials, accepts, improves = 0, 0.0, 0.0
+		// 	}
+		// }
 	}
-	fmt.Fprintln(os.Stderr, "")
+	// fmt.Fprintln(os.Stderr, "")
 
 	// Return best state and energy
 	return a.bestState, a.bestEnergy
@@ -159,13 +139,8 @@ func (ts *CandidateState) Copy() interface{} {
 
 // Swaps two cities in the route.
 func (ts *CandidateState) Move() {
-
-	// ts.state.Print()
 	ts.state, _ = generateCandidateTypeA(ts.state)
 	ts.state.calcCost(alpha)
-	// a := rand.Intn(len(ts.state))
-	// b := rand.Intn(len(ts.state))
-	// ts.state[a], ts.state[b] = ts.state[b], ts.state[a]
 }
 
 // Calculates the length of the route.
@@ -174,18 +149,20 @@ func (ts *CandidateState) Energy() float64 {
 	return ts.state.NormalizedCost
 }
 
-func SA() {
+func SA() Candidate {
 	// initial state, a randomly-ordered itinerary
 	initial_solution := get_initial_solution(cost_matrix, flow_matrix, alpha, no_hubs)
 	init_state := CandidateState{state: initial_solution}
 	tsp := NewAnnealer(&init_state)
-	tsp.Steps = 10000000
-	tsp.Tmax = 10000
+	tsp.Steps = 500000
+	tsp.Tmax = 25000
+	tsp.Tmin = 1
+	tsp.Updates = 50
 
 	state, _ := tsp.Anneal()
 	ts := state.(*CandidateState)
 
 	ts.state.calcCost(alpha)
 
-	ts.state.Print()
+	return ts.state
 }
