@@ -358,6 +358,17 @@ func createPool(population []Organism, maxFitness float64) (pool []Organism) {
 	return
 }
 
+func (d *Organism) isValid() bool {
+	set := make(map[int]int)
+	for _, h := range d.DNA.Hubs {
+		set[h]++
+		if set[h] > 1 {
+			return false
+		}
+	}
+	return true
+}
+
 // perform natural selection to create the next generation
 func naturalSelection(pool []Organism, population []Organism) []Organism {
 	next := make([]Organism, len(population))
@@ -368,6 +379,11 @@ func naturalSelection(pool []Organism, population []Organism) []Organism {
 
 		child := crossover(a, b)
 		child.mutate()
+
+		if !child.isValid() {
+			child = createOrganism(cost_matrix, flow_matrix, alpha, no_hubs)
+		}
+
 		child.calcFitness()
 
 		next[i] = child
@@ -386,6 +402,7 @@ func crossover(d1 Organism, d2 Organism) Organism {
 		DNA:     &dna,
 		Fitness: 0,
 	}
+
 	mid := rand.Intn(len(d1.DNA.Hubs))
 	for i := 0; i < len(d1.DNA.Hubs); i++ {
 		if i > mid {
@@ -410,8 +427,6 @@ func crossover(d1 Organism, d2 Organism) Organism {
 }
 
 // mutate the Organism
-
-// try to mutate hubs and then assign nodes to nearest neighbor
 func (d *Organism) mutate() {
 	for i := 0; i < len(d.DNA.Solution); i++ {
 		if rand.Float64() < MutationRate {

@@ -12,7 +12,6 @@ import (
 
 	// "hash/fnv"
 	"sort"
-	"strings"
 	// "sync"
 )
 
@@ -29,7 +28,7 @@ var iterations = 10
 var maxCandidates = 60
 var tabuSizeDivider = 5
 var maxCandidatesMultiplier = 5
-var aspiration = 40000
+var aspiration = 4
 
 func read_matrix(location string, no_nodes int) (matrix [][]float64, err error) {
 	f, _ := os.Open(location)
@@ -130,8 +129,6 @@ func (c *Candidate) calcCost(alpha float64) {
 }
 
 func get_initial_solution(cost_matrix, flow_matrix [][]float64, alpha float64, number_of_hubs int) Candidate {
-	// use a map to generate this so it can scale
-	// but first check if this is really an issue cuz how many hubs will ever allocate at max
 	candidate := Candidate{}
 
 	// randomly select certain number of hubs
@@ -153,8 +150,6 @@ func get_initial_solution(cost_matrix, flow_matrix [][]float64, alpha float64, n
 		}
 		candidate.Solution = append(candidate.Solution, target_hub)
 	}
-
-	// candidate.Cost = calcTotalCost(cost_matrix, flow_matrix, alpha, candidate.Solution)
 
 	return candidate
 }
@@ -185,12 +180,6 @@ func calcTotalFlow(flow_matrix [][]float64) float64 {
 	return total_flow
 }
 
-func arrayToString(a []int, delim string) string {
-	return strings.Trim(strings.Replace(fmt.Sprint(a), " ", delim, -1), "[]")
-	//return strings.Trim(strings.Join(strings.Split(fmt.Sprint(a), " "), delim), "[]")
-	//return strings.Trim(strings.Join(strings.Fields(fmt.Sprint(a)), delim), "[]")
-}
-
 func isInTabuList(node int, tabuList []int) bool {
 	for _, t := range tabuList {
 		if node == t {
@@ -215,36 +204,6 @@ func selectRandomNodeAndHub(best Candidate) (int, int) {
 	}
 
 	return selected_node, selected_hub
-}
-
-func generateCandidate(sol, hubs []int, current Candidate, tabuList *[]int, tabuSize int, cost_matrix, flow_matrix [][]float64, alpha float64) Candidate {
-
-	/**
-	 *  swap a random node from one hub to another
-	 * 	in a smart way:
-	 *		find the next nearest hub
-	 */
-
-	best := Candidate{}
-
-	best.Solution = make([]int, len(sol))
-	best.Hubs = make([]int, len(hubs))
-	copy(best.Solution, sol)
-	copy(best.Hubs, hubs)
-
-	found_tabu := true
-	var selected_node, selected_hub int
-	for found_tabu {
-		selected_node, selected_hub = selectRandomNodeAndHub(best)
-		if !isInTabuList(selected_node, *tabuList) {
-			found_tabu = false
-		}
-	}
-
-	best.Solution[selected_node] = selected_hub
-	best.Cost = calcTotalCost(cost_matrix, flow_matrix, alpha, best.Solution)
-
-	return best
 }
 
 func updateTabuList(node int, tabuList *[]int, tabuSize int) {
@@ -323,47 +282,43 @@ func TabuSearch(initial_solution Candidate, cost_matrix, flow_matrix [][]float64
 
 	tabuList := make([]int, tabuSize)
 
-	current_best_solution_iteration := 0
 	for i := 0; i < iterations; i++ {
-		if i-current_best_solution_iteration > aspiration {
+
+		if i-best.Iteration > 10000 {
 			break
 		}
-		// fmt.Println("Current", i, current.Hubs)
 
 		var candidates []Candidate
 		for j := 0; j < maxCandidates; j++ {
 			neighbor, swapped_node := generateCandidateTypeA(current)
-			if isInSlice(swapped_node, tabuList) {
-				continue
-			}
 
 			neighbor.SwappedNode = swapped_node
 			neighbor.calcCost(alpha)
-			// fmt.Println(i, neighbor.Hubs)
 			candidates = append(candidates, neighbor)
 		}
 
 		sort.Sort(CandidateVector(candidates))
-
-		// sometimes all generated candidates are in Tabu list
-		if len(candidates) <= 0 {
-			continue
-		}
-
 		bestCandidate := candidates[0]
 
-		updateTabuList(bestCandidate.SwappedNode, &tabuList, tabuSize)
-		// fmt.Println(bestCandidate.Cost / total_flow)
-		if bestCandidate.Cost < current.Cost {
+		if !isInSlice(bestCandidate.SwappedNode, tabuList) || (i-best.Iteration) > aspiration {
 			current = bestCandidate
+			updateTabuList(bestCandidate.SwappedNode, &tabuList, tabuSize)
 			if bestCandidate.Cost < best.Cost {
-				// fmt.Printf("found better solution!\n")
-				// current_best_solution_iteration = i
 				best = bestCandidate
 				best.Iteration = i
-				// fmt.Printf("%4d\t%0.3f\n", i, bestCandidate.NormalizedCost)
+			}
+		} else {
+			c := 0
+			for isInSlice(bestCandidate.SwappedNode, tabuList) && c < len(candidates) {
+				bestCandidate = candidates[c]
+				c++
+			}
 
-				// best.Print()
+			current = bestCandidate
+			updateTabuList(bestCandidate.SwappedNode, &tabuList, tabuSize)
+			if bestCandidate.Cost < best.Cost {
+				best = bestCandidate
+				best.Iteration = i
 			}
 		}
 
@@ -442,7 +397,6 @@ func main() {
 			for _, alfa := range alphas {
 
 				// update the global variable used
-				// TODO: fix this hacky step cuz initially alpha was a global variable used all over the code
 				alpha = alfa
 				var best []Candidate
 
@@ -458,7 +412,6 @@ func main() {
 					best = append(best, c)
 				}
 
-				// TODO: USE A GET BEST FUNCTION!!!! WHY DID I USE THIS IN THE FIRST PLACE?
 				sort.Sort(CandidateVector(best))
 
 				// average TNC
