@@ -12,8 +12,9 @@ Run the compiled binaries from the terminal to run the algorithms
 You can find a detailed report in this repository (report.pdf)
 
 
-# Sample GA output:
+# Sample Outputs:
 
+## Genetic Algorithm
 ```
 Confirguration: Mutataion Rate[0.050]   Population Size[300]    Generations[200]    Aspiration[300]
 Datset                                      No Hubs     Alpha       Hub Locations           TNC                     Avg TNC                 Time Per Run            Total Time              Avg Generations     
