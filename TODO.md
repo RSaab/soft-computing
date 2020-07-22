@@ -1,5 +1,0 @@
-- print the best solution at each iteration to graph the convergence of the algorithm
-- explain parameters
-- graphs
-	- for each algorithm show the optimality gap for eachh data set and conf
-	- show convergence of solution
